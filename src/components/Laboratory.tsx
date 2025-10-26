@@ -128,8 +128,24 @@ export default function Laboratory({ onNavigate }: LaboratoryProps) {
   // set up resize listener once
   useEffect(() => {
     resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-    return () => window.removeEventListener('resize', resizeCanvas);
+    const ro = new ResizeObserver(() => {
+      // debounce
+      if ((window as any).__lab_resize_timeout) clearTimeout((window as any).__lab_resize_timeout);
+      (window as any).__lab_resize_timeout = setTimeout(() => {
+        resizeCanvas();
+      }, 100);
+    });
+    if (canvasRef.current && canvasRef.current.parentElement) {
+      ro.observe(canvasRef.current.parentElement);
+    } else {
+      ro.observe(document.body);
+    }
+    window.addEventListener('resize', resizeCanvas); // fallback
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', resizeCanvas);
+      if ((window as any).__lab_resize_timeout) clearTimeout((window as any).__lab_resize_timeout);
+    };
   }, []);
 
   // recreate simulation when experiment or relevant params change
