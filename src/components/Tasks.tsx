@@ -6,37 +6,76 @@ interface TasksProps {
   onNavigate: (page: string) => void;
 }
 
-// --- helper: попытка получить последние измерения из лаборатории ---
-// Ожидаемый формат, который записывает лаборатория:
-// localStorage.setItem('lab_measurements', JSON.stringify({
-//   experimentType: 'pendulum',
-//   measurements: { period: 2.01, energy: {...}, ... }
-// }));
+// try to get latest measurements saved by Laboratory
 function getLatestMeasurementsFor(experimentType: string) {
   try {
-    // сначала локалсторедж
     const raw = localStorage.getItem('lab_measurements');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.experimentType === experimentType && parsed.measurements) {
-        return parsed.measurements;
-      }
+      if (parsed && parsed.experimentType === experimentType && parsed.measurements) return parsed.measurements;
     }
-  } catch (e) {
-    // ignore parse errors
-  }
-
-  // fallback: глобальная переменная (можете установить в Laboratory: window.__lab_measurements = {...})
+  } catch (e) {}
   try {
     const g = (window as any).__lab_measurements;
     if (g && g.experimentType === experimentType && g.measurements) return g.measurements;
   } catch (e) {}
-
   return null;
 }
 
-// --- задачи ---
-// Каждая задача содержит validation(measured) => { success, message }
+// human-readable labels for targetParams keys
+const paramLabelMap: Record<string, string> = {
+  length: 'Длина',
+  expectedPeriod: 'Ожидаемый период',
+  tolerance: 'Допуск',
+  energyErrorPct: 'Потеря энергии',
+  restitutionMin: 'Коэффициент упругости (e)',
+  momentumError: 'Ошибка импульса (доля)',
+  momentumErrorPct: 'Ошибка импульса (%)',
+  range: 'Дальность',
+  angle: 'Угол',
+  velocity: 'Скорость',
+  optimalAngle: 'Ожидаемый оптимальный угол',
+  mass1Period: 'Период (масса 1)',
+  mass2Period: 'Период (масса 2)',
+  relTolerance: 'Относительная погрешность',
+};
+
+function prettifyKey(key: string) {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (s) => s.toUpperCase())
+    .replace(/Pct/i, '%')
+    .trim();
+}
+
+function formatNumber(n: number, digits = 2) {
+  if (Number.isInteger(n)) return String(n);
+  return Number(n).toFixed(digits).replace(/\.0+$|(?<=\.[0-9]*?)0+$/g, '');
+}
+
+function formatParam(key: string, value: any) {
+  if (typeof value === 'number') {
+    const k = key.toLowerCase();
+    // percent-like keys
+    if (k.includes('pct') || k.includes('percent')) {
+      return `${formatNumber(value, 2)}%`;
+    }
+    if (k.includes('error') && k.includes('pct')) {
+      return `${formatNumber(value, 2)}%`;
+    }
+    if (k === 'tolerance') return `±${formatNumber(value, 2)}`;
+    if (k === 'length' || k.includes('length')) return `${formatNumber(value, 2)} м`;
+    if (k.includes('period') || k.includes('time')) return `${formatNumber(value, 2)} с`;
+    if (k.includes('angle')) return `${formatNumber(value, 1)}°`;
+    if (k.includes('velocity') || k === 'velocity') return `${formatNumber(value, 2)} м/с`;
+    if (k.includes('restitution') || k.includes('restitutionmin')) return `≥ ${formatNumber(value, 2)}`;
+    if (k.includes('momentumerror') && value < 1) return `${(value * 100).toFixed(2)}%`;
+    // default
+    return formatNumber(value, 2);
+  }
+  return String(value);
+}
+
 const tasks: Task[] = [
   {
     id: '1',
@@ -45,14 +84,12 @@ const tasks: Task[] = [
     experimentType: 'pendulum',
     targetParams: { length: 1.0, expectedPeriod: 2.01, tolerance: 0.1 },
     validation: (measured) => {
-      if (!measured || typeof measured.period !== 'number') {
-        return { success: false, message: 'Нет измерения периода. Запустите экспериемент и измерьте период (measured.period).' };
-      }
+      if (!measured || typeof measured.period !== 'number') return { success: false, message: 'Нет измерения периода (measured.period).' };
       const expected = 2.01;
       const tol = 0.1;
       const diff = Math.abs(measured.period - expected);
-      if (diff <= tol) return { success: true, message: `Отлично! Период: ${measured.period.toFixed(2)} с (ожид. ${expected}±${tol})` };
-      return { success: false, message: `Период ${measured.period.toFixed(2)} с — не в пределах ${expected}±${tol}. Попробуйте ещё раз (проверьте длину и начальный угол).` };
+      if (diff <= tol) return { success: true, message: `Отлично! Период: ${measured.period.toFixed(2)} с` };
+      return { success: false, message: `Период ${measured.period.toFixed(2)} с не в диапазоне ${expected} ± ${tol} с` };
     },
   },
   {
@@ -62,14 +99,12 @@ const tasks: Task[] = [
     experimentType: 'projectile',
     targetParams: { range: 40, tolerance: 5 },
     validation: (measured) => {
-      if (!measured || typeof measured.range !== 'number') {
-        return { success: false, message: 'Нет измерения дальности (measured.range). Запустите бросок и снимите дальность.' };
-      }
+      if (!measured || typeof measured.range !== 'number') return { success: false, message: 'Нет измерения дальности (measured.range).' };
       const expected = 40;
       const tol = 5;
       const diff = Math.abs(measured.range - expected);
       if (diff <= tol) return { success: true, message: `Отлично! Дальность: ${measured.range.toFixed(1)} м` };
-      return { success: false, message: `Дальность ${measured.range.toFixed(1)} м не в пределах ${expected}±${tol} м — попробуйте изменить угол/скорость.` };
+      return { success: false, message: `Дальность ${measured.range.toFixed(1)} м не в пределах ${expected} ± ${tol} м` };
     },
   },
   {
@@ -79,14 +114,12 @@ const tasks: Task[] = [
     experimentType: 'collision',
     targetParams: { momentumErrorPct: 1 },
     validation: (measured) => {
-      if (!measured || typeof measured.momentumBefore !== 'number' || typeof measured.momentumAfter !== 'number') {
-        return { success: false, message: 'Не найдены импульсы до/после (measured.momentumBefore / measured.momentumAfter).' };
-      }
+      if (!measured || typeof measured.momentumBefore !== 'number' || typeof measured.momentumAfter !== 'number') return { success: false, message: 'Не найдены импульсы до/после.' };
       const before = measured.momentumBefore;
       const after = measured.momentumAfter;
       const err = Math.abs(after - before) / (Math.abs(before) + 1e-9);
-      if (err <= 0.01) return { success: true, message: `Хорошо! Ошибка сохранения импульса ${(err*100).toFixed(2)}%` };
-      return { success: false, message: `Ошибка ${(err*100).toFixed(2)}% > 1% — проверьте начальные скорости/массы или численную точность.` };
+      if (err <= 0.01) return { success: true, message: `Хорошо! Ошибка сохранения импульса ${(err * 100).toFixed(2)}%` };
+      return { success: false, message: `Ошибка ${(err * 100).toFixed(2)}% > 1%` };
     },
   },
   {
@@ -96,15 +129,11 @@ const tasks: Task[] = [
     experimentType: 'collision',
     targetParams: { energyErrorPct: 2, restitutionMin: 0.95 },
     validation: (measured) => {
-      if (!measured || typeof measured.energyBefore !== 'number' || typeof measured.energyAfter !== 'number') {
-        return { success: false, message: 'Нет измерений энергии (measured.energyBefore / measured.energyAfter).' };
-      }
+      if (!measured || typeof measured.energyBefore !== 'number' || typeof measured.energyAfter !== 'number') return { success: false, message: 'Нет измерений энергии (measured.energyBefore / measured.energyAfter).' };
       const err = Math.abs(measured.energyAfter - measured.energyBefore) / (measured.energyBefore + 1e-9);
       const restitution = measured.restitution ?? 0;
-      if (err <= 0.02 && restitution >= 0.95) {
-        return { success: true, message: `Отлично! Потеря энергии ${(err*100).toFixed(2)}%, e=${restitution.toFixed(2)}` };
-      }
-      return { success: false, message: `Потеря энергии ${(err*100).toFixed(2)}% или e=${restitution.toFixed(2)} — ожидается <2% и e≈1.` };
+      if (err <= 0.02 && restitution >= 0.95) return { success: true, message: `Отлично! Потеря энергии ${(err * 100).toFixed(2)}%, e=${restitution.toFixed(2)}` };
+      return { success: false, message: `Потеря энергии ${(err * 100).toFixed(2)}% или e=${restitution.toFixed(2)} — ожидается <2% и e≈1.` };
     },
   },
   {
@@ -112,15 +141,10 @@ const tasks: Task[] = [
     title: 'Оптимальный угол для дальности',
     description: 'При начальной скорости 20 м/с найдите угол, дающий максимальную дальность (ожидаемо ≈45° без сопротивления).',
     experimentType: 'projectile',
-    targetParams: { velocity: 20, optimalAngle: 45, toleranceDeg: 5 },
+    targetParams: { velocity: 20, optimalAngle: 45, tolerance: 5 },
     validation: (measured) => {
-      if (!measured || typeof measured.angle !== 'number' || typeof measured.range !== 'number' || typeof measured.velocity !== 'number') {
-        return { success: false, message: 'Нужны измерения angle, range и velocity.' };
-      }
-      if (Math.abs(measured.velocity - 20) > 1e-6) {
-        return { success: false, message: `Установите скорость в 20 м/с. Сейчас velocity=${measured.velocity}` };
-      }
-      // здесь предполагается, что пользователь исследовал несколько значений угла и выбрал лучший — но мы валидируем его результат
+      if (!measured || typeof measured.angle !== 'number' || typeof measured.range !== 'number' || typeof measured.velocity !== 'number') return { success: false, message: 'Нужны измерения angle, range и velocity.' };
+      if (Math.abs(measured.velocity - 20) > 1e-6) return { success: false, message: `Установите скорость в 20 м/с. Сейчас velocity=${measured.velocity}` };
       const diff = Math.abs(measured.angle - 45);
       if (diff <= 5) return { success: true, message: `Хорошо! Угол ${measured.angle}° дает дальность ${measured.range.toFixed(1)} м` };
       return { success: false, message: `Угол ${measured.angle}° далеко от ожидаемого ~45°. Попробуйте 35–55° и найдите максимум.` };
@@ -133,12 +157,9 @@ const tasks: Task[] = [
     experimentType: 'pendulum',
     targetParams: { length: 2.0, relTolerance: 0.05 },
     validation: (measured) => {
-      // ожидаем measured.massPeriods = [{mass: 0.5, period: 2.83}, {mass: 2.0, period: 2.82}] или поля mass1Period/mass2Period
       const p1 = measured.mass1Period ?? (measured.massPeriods && measured.massPeriods[0] && measured.massPeriods[0].period);
       const p2 = measured.mass2Period ?? (measured.massPeriods && measured.massPeriods[1] && measured.massPeriods[1].period);
-      if (typeof p1 !== 'number' || typeof p2 !== 'number') {
-        return { success: false, message: 'Требуются два измерения периодов для разных масс (mass1Period, mass2Period или massPeriods).' };
-      }
+      if (typeof p1 !== 'number' || typeof p2 !== 'number') return { success: false, message: 'Требуются два измерения периодов для разных масс.' };
       const diff = Math.abs(p1 - p2);
       const avg = (p1 + p2) / 2;
       if (diff / avg < 0.05) return { success: true, message: `Верно — периоды ${p1.toFixed(2)} с и ${p2.toFixed(2)} с практически равны.` };
@@ -149,7 +170,6 @@ const tasks: Task[] = [
 
 export default function Tasks({ onNavigate }: TasksProps) {
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
-  const [selectedTask, setSelectedTask] = useState<string | null>(null);
 
   const handleTaskComplete = (taskId: string) => {
     setCompletedTasks((prev) => new Set([...prev, taskId]));
@@ -200,7 +220,7 @@ export default function Tasks({ onNavigate }: TasksProps) {
                       <div className="font-semibold mb-1">Целевые параметры:</div>
                       <div className="space-y-1">
                         {Object.entries(task.targetParams).map(([key, value]) => (
-                          <div key={key}>{key}: {typeof value === 'number' ? Number(value).toFixed(2) : String(value)}</div>
+                          <div key={key}>{paramLabelMap[key] ?? prettifyKey(key)}: {formatParam(key, value)}</div>
                         ))}
                       </div>
                     </div>
@@ -208,32 +228,19 @@ export default function Tasks({ onNavigate }: TasksProps) {
                 </div>
 
                 <div className="flex space-x-2">
-                  <button onClick={() => onNavigate('laboratory')} className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
-                    Открыть в лаборатории
-                  </button>
+                  <button onClick={() => onNavigate('laboratory')} className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">Открыть в лаборатории</button>
 
                   {!isCompleted && (
                     <button onClick={() => {
-                      // пробуем взять реальные измерения
                       const measured = getLatestMeasurementsFor(task.experimentType);
-
                       if (!measured) {
-                        // если нет — спросим пользователя / используем mock для разработки
                         const useMock = confirm('Не найдены реальные измерения из лаборатории. Использовать тестовые (mock) данные для проверки?');
                         if (!useMock) return;
                       }
-
                       const measurementToUse = measured ?? ((): any => {
-                        // старый mock (как у вас раньше) — полезно для разработки
-                        if (task.experimentType === 'pendulum') {
-                          return { period: 2.05, mass1Period: 2.83, mass2Period: 2.81 };
-                        }
-                        if (task.experimentType === 'projectile') {
-                          return { range: 42, angle: 44, velocity: 20 };
-                        }
-                        if (task.experimentType === 'collision') {
-                          return { momentumBefore: 10, momentumAfter: 9.995, energyBefore: 50, energyAfter: 49.25, restitution: 1.0, momentumError: 0.005, energyError: 0.015 };
-                        }
+                        if (task.experimentType === 'pendulum') return { period: 2.05, mass1Period: 2.83, mass2Period: 2.81 };
+                        if (task.experimentType === 'projectile') return { range: 42, angle: 44, velocity: 20 };
+                        if (task.experimentType === 'collision') return { momentumBefore: 10, momentumAfter: 9.995, energyBefore: 50, energyAfter: 49.25, restitution: 1.0, momentumError: 0.005, energyError: 0.015 };
                         return {};
                       })();
 
